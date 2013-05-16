@@ -103,8 +103,8 @@ void pub_func(const program_options::variables_map vm) {
 	}
 	for(size_t pubCount=0; pubCount<vm["count"].as<size_t>(); ++pubCount) {
 		for(size_t partNo=1; partNo<vm["parts"].as<size_t>(); ++partNo)
-			pub.send(payload.data(), payload.size(), ZMQ_SNDMORE);
-		pub.send(payload.data(), payload.size());
+			assert(pub.send(payload.data(), payload.size(), ZMQ_SNDMORE)==payload.size());
+		assert(pub.send(payload.data(), payload.size())==payload.size());
 	}
 	this_thread::sleep(posix_time::seconds(vm["recovery-time"].as<long>()));
 	for(size_t pubCount=0; pubCount<vm["recovery-count"].as<size_t>(); ++pubCount) {
