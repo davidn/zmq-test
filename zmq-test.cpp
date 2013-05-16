@@ -103,7 +103,7 @@ void pub_func(const program_options::variables_map vm) {
 		pub.send(payload.data(), payload.size());
 	}
 	this_thread::sleep(posix_time::seconds(vm["recovery-time"].as<long>()));
-	for(size_t pubCount=0; pubCount<100; ++pubCount) {
+	for(size_t pubCount=0; pubCount<vm["recovery-count"].as<size_t>(); ++pubCount) {
 		if (vm["recovery-rate"].as<size_t>() > 0)
 			this_thread::sleep(posix_time::millisec(1000.0/vm["recovery-rate"].as<size_t>()));
 		pub.send("bye", 3);
@@ -173,7 +173,7 @@ int main(int argc, const char**argv) {
 		" 4. Sending thread seands *count* groups of *parts* messages, each\n"\
 		"    *size* bytes long.\n"\
 		" 5. Sending thread sleeps *recovery-time* seconds.\n"\
-		" 6. Sending thread sends 100 messages.\n"\
+		" 6. Sending thread sends *recovery-count* messages.\n"\
 		" 7. Listening thread prints the number of messages recieved from\n"\
 		"    the first or second\n"\
 		" 8. At this point or *recv-time* seconds after (4), whichever is\n"\
@@ -193,6 +193,7 @@ int main(int argc, const char**argv) {
 		("send", "Only start sending thread.")
 		("recv", "Only start recieving thread.")
 		("recovery-time", program_options::value<long>()->default_value(1), "Time to allow for recovery.")
+		("recovery-count", program_options::value<size_t>()->default_value(100), "Number of messages to send as recovery.")
 		("recv-time", program_options::value<long>()->default_value(0), "Time to allow recv to catch up.")
 		("recovery-rate", program_options::value<size_t>()->default_value(0), "Rate at which recovery messages are sent (after recv-time) in messages per second. 0 means all at once after recv-time.");
 	program_options::variables_map vm;
