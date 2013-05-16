@@ -86,6 +86,10 @@ void pub_func(const program_options::variables_map vm) {
 	zmq_socket_monitor(pub, "inproc://monitor.pub", ZMQ_EVENT_ALL);
 	thread monitor_thread(monitor_func, &ctxt, "inproc://monitor.pub", "pub");
 	std::string payload(vm["size"].as<size_t>(), '.');
+	if (vm.count("no-linger")) {
+		int linger = 0;
+		pub.setsockopt(ZMQ_LINGER, &linger, sizeof(linger));
+	}
 	if (vm.count("sndhwm")) {
 		auto sndhwm = vm["sndhwm"].as<int>();
 		pub.setsockopt(ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
@@ -187,6 +191,7 @@ int main(int argc, const char**argv) {
 		("version", "Print program version.")
 		("sndhwm", program_options::value<int>(), "set ZMQ_SNDHWM")
 		("rcvhwm", program_options::value<int>(), "set ZMQ_RCVHWM")
+		("no-linger", "Turn off ZMQ_LINGER.")
 		("size", program_options::value<size_t>()->default_value(2), "payload size")
 		("count", program_options::value<size_t>()->default_value(10000), "number of messages to send.")
 		("parts", program_options::value<size_t>()->default_value(1), "number of message parts in each send.")
