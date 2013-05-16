@@ -27,9 +27,64 @@ void sig_handler(int) {
 		sub_thread->interrupt();
 }
 
+void monitor_func(context_t * ctxt, const std::string addr, const std::string topic) {
+	socket_t pair(*ctxt, ZMQ_PAIR);
+	pair.connect(addr.c_str());
+	pollitem_t items[1] = {{(void*)pair, 0, ZMQ_POLLIN, 0}};
+	try {
+		while(true) {
+			this_thread::interruption_point();
+			items[0].revents = 0;
+			if(poll(items, sizeof(items)/sizeof(items[0]), 1000)>0) {
+				message_t msg;
+				pair.recv(&msg);
+				const zmq_event_t * event = reinterpret_cast<const zmq_event_t*>(msg.data());
+				ostringstream oss;
+				oss << topic << ": ";
+				switch (event->event) {
+					case ZMQ_EVENT_CONNECTED:
+						oss << "ZMQ_EVENT_CONNECTED (addr=" << event->data.connected.addr << ", fd="<<event->data.connected.fd<<")";
+						break;
+					case ZMQ_EVENT_CONNECT_DELAYED:
+						oss << "ZMQ_EVENT_CONNECT_DELAYED (addr=" << event->data.connect_delayed.addr << ", err="<<strerror(event->data.connect_delayed.err)<<")";
+						break;
+					case ZMQ_EVENT_CONNECT_RETRIED:
+						oss << "ZMQ_EVENT_CONNECT_RETRIED (addr=" << event->data.connect_retried.addr << ", interval="<<event->data.connect_retried.interval<<")";
+						break;
+					case ZMQ_EVENT_LISTENING:
+						oss << "ZMQ_EVENT_LISTENING (addr=" << event->data.listening.addr << ", fd="<<event->data.listening.fd<<")";
+						break;
+					case ZMQ_EVENT_BIND_FAILED:
+						oss << "ZMQ_EVENT_BIND_FAILED (addr=" << event->data.bind_failed.addr << ", err="<<strerror(event->data.bind_failed.err)<<")";
+						break;
+					case ZMQ_EVENT_ACCEPTED:
+						oss << "ZMQ_EVENT_ACCEPTED (addr=" << event->data.accepted.addr << ", fd="<<event->data.accepted.fd<<")";
+						break;
+					case ZMQ_EVENT_ACCEPT_FAILED:
+						oss << "ZMQ_EVENT_ACCEPT_FAILED (addr=" << event->data.accept_failed.addr << ", err="<<strerror(event->data.accept_failed.err)<<")";
+						break;
+					case ZMQ_EVENT_CLOSED:
+						oss << "ZMQ_EVENT_CLOSED (addr=" << event->data.closed.addr << ", fd="<<event->data.closed.fd<<")";
+						break;
+					case ZMQ_EVENT_CLOSE_FAILED:
+						oss << "ZMQ_EVENT_CLOSE_FAILED (addr=" << event->data.close_failed.addr << ", err="<<strerror(event->data.close_failed.err)<<")";
+						break;
+					case ZMQ_EVENT_DISCONNECTED:
+						oss << "ZMQ_EVENT_DISCONNECTED (addr=" << event->data.disconnected.addr << ", fd="<<event->data.disconnected.fd<<")";
+						break;
+				}
+				cerr << oss.str() << endl;
+			}
+		}
+	} catch (thread_interrupted & e) {
+	}
+}
+
 void pub_func(const program_options::variables_map vm) {
 	context_t ctxt(1);
 	socket_t pub(ctxt, ZMQ_PUB);
+	zmq_socket_monitor(pub, "inproc://monitor.pub", ZMQ_EVENT_ALL);
+	thread monitor_thread(monitor_func, &ctxt, "inproc://monitor.pub", "pub");
 	std::string payload(vm["size"].as<size_t>(), '.');
 	if (vm.count("sndhwm")) {
 		auto sndhwm = vm["sndhwm"].as<int>();
@@ -53,11 +108,15 @@ void pub_func(const program_options::variables_map vm) {
 			this_thread::sleep(posix_time::millisec(1000.0/vm["recovery-rate"].as<size_t>()));
 		pub.send("bye", 3);
 	}
+	monitor_thread.interrupt();
+	monitor_thread.join();
 }
 
 void sub_func(const program_options::variables_map vm) {
 	context_t ctxt(1);
 	socket_t sub(ctxt, ZMQ_SUB);
+	zmq_socket_monitor(sub, "inproc://monitor.sub", ZMQ_EVENT_ALL);
+	thread monitor_thread(monitor_func, &ctxt, "inproc://monitor.sub", "sub");
 	pollitem_t items[1] = {{(void*)sub, 0, ZMQ_POLLIN, 0}};
 	sub.setsockopt(ZMQ_SUBSCRIBE, "", 0);
 	if (vm.count("rcvhwm")) {
@@ -92,6 +151,8 @@ void sub_func(const program_options::variables_map vm) {
 	} catch (thread_interrupted & e) {
 		cout << subCount << endl;
 	}
+	monitor_thread.interrupt();
+	monitor_thread.join();
 }
 
 int main(int argc, const char**argv) {
