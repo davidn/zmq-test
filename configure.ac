@@ -14,13 +14,12 @@ AX_CXX_COMPILE_STDCXX_11
 AM_MISSING_PROG(HELP2MAN, help2man, $missing_dir)
 
 # Checks for libraries.
-AC_CHECK_LIB([boost_thread], [_ZN5boost6threadC1Ev], [], [AC_MSG_ERROR([Require boost_thread])])
 AC_CHECK_LIB([boost_program_options], [_ZN5boost15program_options13variables_mapC1Ev], [], [AC_MSG_ERROR([Require boost_program_options])])
 AC_CHECK_LIB([zmq], [zmq_init], [], [AC_MSG_ERROR([Require zmq])])
 
 # Checks for header files.
 AC_CHECK_HEADERS([zmq.h])
-AC_CHECK_HEADERS([boost/thread.hpp])
+AC_CHECK_HEADERS([boost/program_options.hpp])
 
 # Checks for typedefs, structures, and compiler characteristics.
 

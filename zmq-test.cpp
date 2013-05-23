@@ -1,10 +1,11 @@
 #include <signal.h>
 #include <fstream>
 #include <memory>
-#include <boost/thread.hpp>
-#include <boost/thread/mutex.hpp>
-#include <boost/thread/condition_variable.hpp>
-#include <boost/date_time.hpp>
+#include <atomic>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
 #include <boost/program_options.hpp>
 #include "zmq.hpp"
 
@@ -14,77 +15,77 @@
 
 using namespace std;
 using namespace zmq;
-using namespace boost;
+namespace po = boost::program_options;
 
-bool flag = false;
-mutex flagMutex;
-condition_variable flagCond;
-std::shared_ptr<thread> sub_thread;
-std::shared_ptr<thread> pub_thread;
+bool subReadyFlag = false;
+mutex subReadyMutex;
+condition_variable subReadyCond;
+
+atomic<bool> pubDoneFlag(false);
+atomic<bool> subDoneFlag(false);
+
+shared_ptr<thread> sub_thread;
+shared_ptr<thread> pub_thread;
 
 void sig_handler(int) {
-	if (sub_thread)
-		sub_thread->interrupt();
+	pubDoneFlag = true;
+	subDoneFlag = true;
 }
 
-void monitor_func(context_t * ctxt, const std::string addr, const std::string topic) {
-	socket_t pair(*ctxt, ZMQ_PAIR);
+void monitor_func(context_t & ctxt, const std::string addr, const std::string topic, const atomic<bool> & doneFlag) {
+	socket_t pair(ctxt, ZMQ_PAIR);
 	pair.connect(addr.c_str());
 	pollitem_t items[1] = {{(void*)pair, 0, ZMQ_POLLIN, 0}};
-	try {
-		while(true) {
-			this_thread::interruption_point();
-			items[0].revents = 0;
-			if(poll(items, sizeof(items)/sizeof(items[0]), 1000)>0) {
-				message_t msg;
-				pair.recv(&msg);
-				const zmq_event_t * event = reinterpret_cast<const zmq_event_t*>(msg.data());
-				ostringstream oss;
-				oss << topic << ": ";
-				switch (event->event) {
-					case ZMQ_EVENT_CONNECTED:
-						oss << "ZMQ_EVENT_CONNECTED (addr=" << event->data.connected.addr << ", fd="<<event->data.connected.fd<<")";
-						break;
-					case ZMQ_EVENT_CONNECT_DELAYED:
-						oss << "ZMQ_EVENT_CONNECT_DELAYED (addr=" << event->data.connect_delayed.addr << ", err="<<strerror(event->data.connect_delayed.err)<<")";
-						break;
-					case ZMQ_EVENT_CONNECT_RETRIED:
-						oss << "ZMQ_EVENT_CONNECT_RETRIED (addr=" << event->data.connect_retried.addr << ", interval="<<event->data.connect_retried.interval<<")";
-						break;
-					case ZMQ_EVENT_LISTENING:
-						oss << "ZMQ_EVENT_LISTENING (addr=" << event->data.listening.addr << ", fd="<<event->data.listening.fd<<")";
-						break;
-					case ZMQ_EVENT_BIND_FAILED:
-						oss << "ZMQ_EVENT_BIND_FAILED (addr=" << event->data.bind_failed.addr << ", err="<<strerror(event->data.bind_failed.err)<<")";
-						break;
-					case ZMQ_EVENT_ACCEPTED:
-						oss << "ZMQ_EVENT_ACCEPTED (addr=" << event->data.accepted.addr << ", fd="<<event->data.accepted.fd<<")";
-						break;
-					case ZMQ_EVENT_ACCEPT_FAILED:
-						oss << "ZMQ_EVENT_ACCEPT_FAILED (addr=" << event->data.accept_failed.addr << ", err="<<strerror(event->data.accept_failed.err)<<")";
-						break;
-					case ZMQ_EVENT_CLOSED:
-						oss << "ZMQ_EVENT_CLOSED (addr=" << event->data.closed.addr << ", fd="<<event->data.closed.fd<<")";
-						break;
-					case ZMQ_EVENT_CLOSE_FAILED:
-						oss << "ZMQ_EVENT_CLOSE_FAILED (addr=" << event->data.close_failed.addr << ", err="<<strerror(event->data.close_failed.err)<<")";
-						break;
-					case ZMQ_EVENT_DISCONNECTED:
-						oss << "ZMQ_EVENT_DISCONNECTED (addr=" << event->data.disconnected.addr << ", fd="<<event->data.disconnected.fd<<")";
-						break;
-				}
-				cerr << oss.str() << endl;
+	while(doneFlag == false) {
+		items[0].revents = 0;
+		if(poll(items, sizeof(items)/sizeof(items[0]), 1000)>0) {
+			message_t msg;
+			pair.recv(&msg);
+			const zmq_event_t * event = reinterpret_cast<const zmq_event_t*>(msg.data());
+			ostringstream oss;
+			oss << topic << ": ";
+			switch (event->event) {
+				case ZMQ_EVENT_CONNECTED:
+					oss << "ZMQ_EVENT_CONNECTED (addr=" << event->data.connected.addr << ", fd="<<event->data.connected.fd<<")";
+					break;
+				case ZMQ_EVENT_CONNECT_DELAYED:
+					oss << "ZMQ_EVENT_CONNECT_DELAYED (addr=" << event->data.connect_delayed.addr << ", err="<<strerror(event->data.connect_delayed.err)<<")";
+					break;
+				case ZMQ_EVENT_CONNECT_RETRIED:
+					oss << "ZMQ_EVENT_CONNECT_RETRIED (addr=" << event->data.connect_retried.addr << ", interval="<<event->data.connect_retried.interval<<")";
+					break;
+				case ZMQ_EVENT_LISTENING:
+					oss << "ZMQ_EVENT_LISTENING (addr=" << event->data.listening.addr << ", fd="<<event->data.listening.fd<<")";
+					break;
+				case ZMQ_EVENT_BIND_FAILED:
+					oss << "ZMQ_EVENT_BIND_FAILED (addr=" << event->data.bind_failed.addr << ", err="<<strerror(event->data.bind_failed.err)<<")";
+					break;
+				case ZMQ_EVENT_ACCEPTED:
+					oss << "ZMQ_EVENT_ACCEPTED (addr=" << event->data.accepted.addr << ", fd="<<event->data.accepted.fd<<")";
+					break;
+				case ZMQ_EVENT_ACCEPT_FAILED:
+					oss << "ZMQ_EVENT_ACCEPT_FAILED (addr=" << event->data.accept_failed.addr << ", err="<<strerror(event->data.accept_failed.err)<<")";
+					break;
+				case ZMQ_EVENT_CLOSED:
+					oss << "ZMQ_EVENT_CLOSED (addr=" << event->data.closed.addr << ", fd="<<event->data.closed.fd<<")";
+					break;
+				case ZMQ_EVENT_CLOSE_FAILED:
+					oss << "ZMQ_EVENT_CLOSE_FAILED (addr=" << event->data.close_failed.addr << ", err="<<strerror(event->data.close_failed.err)<<")";
+					break;
+				case ZMQ_EVENT_DISCONNECTED:
+					oss << "ZMQ_EVENT_DISCONNECTED (addr=" << event->data.disconnected.addr << ", fd="<<event->data.disconnected.fd<<")";
+					break;
 			}
+			cerr << oss.str() << endl;
 		}
-	} catch (thread_interrupted & e) {
 	}
 }
 
-void pub_func(const program_options::variables_map vm) {
+void pub_func(const po::variables_map vm) {
 	context_t ctxt(1);
 	socket_t pub(ctxt, ZMQ_PUB);
 	zmq_socket_monitor(pub, "inproc://monitor.pub", ZMQ_EVENT_ALL);
-	thread monitor_thread(monitor_func, &ctxt, "inproc://monitor.pub", "pub");
+	thread monitor_thread(monitor_func, ref(ctxt), "inproc://monitor.pub", "pub", ref(pubDoneFlag));
 	std::string payload(vm["size"].as<size_t>(), '.');
 	if (vm.count("no-linger")) {
 		int linger = 0;
@@ -96,31 +97,30 @@ void pub_func(const program_options::variables_map vm) {
 	}
 	pub.bind("tcp://*:4404");
 	{
-		unique_lock<mutex> lock(flagMutex);
-		while(flag == false) {
-			flagCond.wait(lock);
-		}
+		unique_lock<mutex> lock(subReadyMutex);
+		while(subReadyFlag == false)
+			subReadyCond.wait(lock);
 	}
 	for(size_t pubCount=0; pubCount<vm["count"].as<size_t>(); ++pubCount) {
 		for(size_t partNo=1; partNo<vm["parts"].as<size_t>(); ++partNo)
 			assert(pub.send(payload.data(), payload.size(), ZMQ_SNDMORE)==payload.size());
 		assert(pub.send(payload.data(), payload.size())==payload.size());
 	}
-	this_thread::sleep(posix_time::seconds(vm["recovery-time"].as<long>()));
+	this_thread::sleep_for(chrono::seconds(vm["recovery-time"].as<long>()));
 	for(size_t pubCount=0; pubCount<vm["recovery-count"].as<size_t>(); ++pubCount) {
 		if (vm["recovery-rate"].as<size_t>() > 0)
-			this_thread::sleep(posix_time::millisec(1000.0/vm["recovery-rate"].as<size_t>()));
+			this_thread::sleep_for(chrono::milliseconds(1000/vm["recovery-rate"].as<size_t>()));
 		pub.send("bye", 3);
 	}
-	monitor_thread.interrupt();
+	pubDoneFlag = true;
 	monitor_thread.join();
 }
 
-void sub_func(const program_options::variables_map vm) {
+void sub_func(const po::variables_map vm) {
 	context_t ctxt(1);
 	socket_t sub(ctxt, ZMQ_SUB);
 	zmq_socket_monitor(sub, "inproc://monitor.sub", ZMQ_EVENT_ALL);
-	thread monitor_thread(monitor_func, &ctxt, "inproc://monitor.sub", "sub");
+	thread monitor_thread(monitor_func, ref(ctxt), "inproc://monitor.sub", "sub", ref(subDoneFlag));
 	pollitem_t items[1] = {{(void*)sub, 0, ZMQ_POLLIN, 0}};
 	sub.setsockopt(ZMQ_SUBSCRIBE, "", 0);
 	if (vm.count("rcvhwm")) {
@@ -130,32 +130,27 @@ void sub_func(const program_options::variables_map vm) {
 	sub.connect("tcp://localhost:4404");
 	size_t subCount = 0;
 	bool hi=true;
-	try {
-		while(true) {
-			items[0].revents = 0;
-			if(poll(items, sizeof(items)/sizeof(items[0]), 1000)>0) {
-				message_t msg;
-				sub.recv(&msg);
-				if (hi && msg.size()==3){
-					cout << subCount << endl;
-					subCount=0;
-					hi=false;
-				}
-				++subCount;
-			} else {
-				this_thread::interruption_point();
+	while(true) {
+		items[0].revents = 0;
+		if(poll(items, sizeof(items)/sizeof(items[0]), 1000)>0) {
+			message_t msg;
+			sub.recv(&msg);
+			if (hi && msg.size()==3){
+				cout << subCount << endl;
+				subCount=0;
+				hi=false;
 			}
-			if(flag == false)
-			{
-				unique_lock<mutex> lock(flagMutex);
-				flag = true;
-				flagCond.notify_all();
-			}
+			++subCount;
+		} else if (pubDoneFlag == true)
+			break;
+		if(subReadyFlag == false) {
+			unique_lock<mutex> lock(subReadyMutex);
+			subReadyFlag = true;
+			subReadyCond.notify_all();
 		}
-	} catch (thread_interrupted & e) {
-		cout << subCount << endl;
 	}
-	monitor_thread.interrupt();
+	cout << subCount << endl;
+	subDoneFlag = true;
 	monitor_thread.join();
 }
 
@@ -185,29 +180,29 @@ int main(int argc, const char**argv) {
 		"    message in a 100ms window.\n"\
 		"\n"\
 		"Options";
-	program_options::options_description desc(helptext.str());
+	po::options_description desc(helptext.str());
 	desc.add_options()
 		("help,h", "Print this help message.")
 		("version", "Print program version.")
-		("sndhwm", program_options::value<int>(), "set ZMQ_SNDHWM")
-		("rcvhwm", program_options::value<int>(), "set ZMQ_RCVHWM")
+		("sndhwm", po::value<int>(), "set ZMQ_SNDHWM")
+		("rcvhwm", po::value<int>(), "set ZMQ_RCVHWM")
 		("no-linger", "Turn off ZMQ_LINGER.")
-		("size", program_options::value<size_t>()->default_value(2), "payload size")
-		("count", program_options::value<size_t>()->default_value(10000), "number of messages to send.")
-		("parts", program_options::value<size_t>()->default_value(1), "number of message parts in each send.")
+		("size", po::value<size_t>()->default_value(2), "payload size")
+		("count", po::value<size_t>()->default_value(10000), "number of messages to send.")
+		("parts", po::value<size_t>()->default_value(1), "number of message parts in each send.")
 		("send", "Only start sending thread.")
 		("recv", "Only start recieving thread.")
-		("recovery-time", program_options::value<long>()->default_value(1), "Time to allow for recovery.")
-		("recovery-count", program_options::value<size_t>()->default_value(100), "Number of messages to send as recovery.")
-		("recv-time", program_options::value<long>()->default_value(0), "Time to allow recv to catch up.")
-		("recovery-rate", program_options::value<size_t>()->default_value(0), "Rate at which recovery messages are sent (after recv-time) in messages per second. 0 means all at once after recv-time.");
-	program_options::variables_map vm;
+		("recovery-time", po::value<long>()->default_value(1), "Time to allow for recovery.")
+		("recovery-count", po::value<size_t>()->default_value(100), "Number of messages to send as recovery.")
+		("recv-time", po::value<long>()->default_value(0), "Time to allow recv to catch up.")
+		("recovery-rate", po::value<size_t>()->default_value(0), "Rate at which recovery messages are sent (after recv-time) in messages per second. 0 means all at once after recv-time.");
+	po::variables_map vm;
 	try {
-		program_options::store(program_options::parse_command_line(argc, argv, desc), vm);
-	} catch (program_options::unknown_option & e) {
+		po::store(po::parse_command_line(argc, argv, desc), vm);
+	} catch (po::unknown_option & e) {
 		cout << e.what() << endl << desc;
 		return 1;
-	} catch (program_options::invalid_option_value & e) {
+	} catch (po::invalid_option_value & e) {
 		cout << e.what() << endl << desc;
 		return 1;
 	}
@@ -219,17 +214,17 @@ int main(int argc, const char**argv) {
 		cout << desc;
 		return 0;
 	}
-	program_options::notify(vm);
+	po::notify(vm);
 
 	if (vm.count("recv") || !vm.count("send"))
 		sub_thread.reset(new thread(sub_func, vm));
 	if (vm.count("send") || !vm.count("recv")) {
 		pub_thread.reset(new thread(pub_func, vm));
 		if (vm.count("send") && !vm.count("recv")) {
-			this_thread::sleep(posix_time::seconds(1));
-			unique_lock<mutex> lock(flagMutex);
-			flag = true;
-			flagCond.notify_all();
+			this_thread::sleep_for(chrono::seconds(1));
+			unique_lock<mutex> lock(subReadyMutex);
+			subReadyFlag = true;
+			subReadyCond.notify_all();
 		}
 	} else {
 		struct sigaction sa;
@@ -237,11 +232,9 @@ int main(int argc, const char**argv) {
 		sigaction(SIGINT, &sa, NULL);
 	}
 
-	this_thread::sleep(posix_time::seconds(vm["recv-time"].as<long>()));
+	this_thread::sleep_for(chrono::seconds(vm["recv-time"].as<long>()));
 	if (pub_thread)
 		pub_thread->join();
-	if (pub_thread && sub_thread)
-		sub_thread->interrupt();
 	if (sub_thread)
 		sub_thread->join();
 }
