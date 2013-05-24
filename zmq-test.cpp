@@ -127,7 +127,7 @@ void sub_func(const po::variables_map vm) {
 		auto rcvhwm = vm["rcvhwm"].as<int>();
 		sub.setsockopt(ZMQ_SNDHWM, &rcvhwm, sizeof(rcvhwm));
 	}
-	sub.connect("tcp://localhost:4404");
+	sub.connect(("tcp://"+vm["address"].as<string>()+":4404").c_str());
 	size_t subCount = 0;
 	bool hi=true;
 	while(true) {
@@ -195,7 +195,8 @@ int main(int argc, const char**argv) {
 		("recovery-time", po::value<long>()->default_value(1), "Time to allow for recovery.")
 		("recovery-count", po::value<size_t>()->default_value(100), "Number of messages to send as recovery.")
 		("recv-time", po::value<long>()->default_value(0), "Time to allow recv to catch up.")
-		("recovery-rate", po::value<size_t>()->default_value(0), "Rate at which recovery messages are sent (after recv-time) in messages per second. 0 means all at once after recv-time.");
+		("recovery-rate", po::value<size_t>()->default_value(0), "Rate at which recovery messages are sent (after recv-time) in messages per second. 0 means all at once after recv-time.")
+		("address", po::value<string>()->default_value("127.0.0.1"), "Address to connect to");
 	po::variables_map vm;
 	try {
 		po::store(po::parse_command_line(argc, argv, desc), vm);
