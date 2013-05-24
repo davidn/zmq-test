@@ -222,7 +222,7 @@ int main(int argc, const char**argv) {
 	if (vm.count("send") || !vm.count("recv")) {
 		pub_thread.reset(new thread(pub_func, vm));
 		if (vm.count("send") && !vm.count("recv")) {
-			this_thread::sleep_for(chrono::seconds(1));
+			this_thread::sleep_for(chrono::seconds(6));
 			unique_lock<mutex> lock(subReadyMutex);
 			subReadyFlag = true;
 			subReadyCond.notify_all();
