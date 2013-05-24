@@ -1,0 +1,4 @@
+Zmq-test
+--------
+
+A little utility to see if I could break ZMQ pub-sub.
